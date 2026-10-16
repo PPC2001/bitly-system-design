@@ -1,0 +1,89 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: bitly-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bitly_user -d bitly_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - bitly-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: bitly-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - bitly-network
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: bitly-redis-commander
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - bitly-network
+    profiles:
+      - tools
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bitly-app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/bitly_db
+      SPRING_DATASOURCE_USERNAME: bitly_user
+      SPRING_DATASOURCE_PASSWORD: bitly_pass
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      APP_BASE_URL: http://localhost:8080
+      APP_SNOWFLAKE_NODE_ID: 1
+      JAVA_TOOL_OPTIONS: "-Xms256m -Xmx512m"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - bitly-network
+    profiles:
+      - full
+
+networks:
+  bitly-network:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
